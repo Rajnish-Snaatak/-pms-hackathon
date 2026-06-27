@@ -131,7 +131,7 @@ export default function ReviewPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-extrabold text-ink">Performance review</h1>
-          <p className="text-sm text-ink-muted">Q3 2025 cycle</p>
+          <p className="text-sm text-ink-muted">Jun 2026 cycle</p>
         </div>
         {selectable.length > 0 && (
           <select className="input max-w-xs" value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
