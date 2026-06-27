@@ -10,14 +10,6 @@ const SWATCHES = [
   '#d93025', '#34a853', '#f29900', '#9334e6',
 ]
 
-function initialsFrom(name) {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() || '')
-    .join('')
-}
 
 export default function TeamsPage() {
   const role = useStore((s) => s.currentRole)
@@ -26,10 +18,7 @@ export default function TeamsPage() {
   const goals = useStore((s) => s.goals)
   const events = useStore((s) => s.events)
   const reviews = useStore((s) => s.reviews)
-  const teamMembers = useStore((s) => s.teamMembers)
   const addTeam = useStore((s) => s.addTeam)
-  const addMember = useStore((s) => s.addMember)
-  const removeMember = useStore((s) => s.removeMember)
 
   const canEdit = role === 'manager' || role === 'hr'
 
@@ -46,16 +35,26 @@ export default function TeamsPage() {
     if (!selectedId && teams.length) setSelectedId(teams[0].id)
   }, [teams, selectedId])
 
-  const membersOf = (teamId) => teamMembers[teamId] || []
+  // Members are the real user accounts on a team (managed via the People page),
+  // mapped into the shape MemberTable expects.
+  const membersOf = (teamId) =>
+    users
+      .filter((u) => u.team_id === teamId)
+      .map((u) => ({
+        id: u.id,
+        user_id: u.id,
+        name: u.name,
+        initials: u.initials,
+        role_title: u.title,
+      }))
 
   // Derive the team's manager(s) from the actual manager users assigned to the
-  // team, falling back to the team's stored manager_name text.
+  // team. No stale fallback — if no manager user exists, show "No manager".
   const teamManagerName = (teamId) => {
     const mgrs = users
       .filter((u) => u.role === 'manager' && u.team_id === teamId)
       .map((u) => u.name)
-    if (mgrs.length) return mgrs.join(', ')
-    return teams.find((t) => t.id === teamId)?.manager_name || '—'
+    return mgrs.length ? mgrs.join(', ') : 'No manager'
   }
 
   const reviewPctOf = (teamId) => {
@@ -107,15 +106,6 @@ export default function TeamsPage() {
       setTeam({ name: '', full_name: '', manager_name: '', color: SWATCHES[0] })
       setShowTeamForm(false)
     }
-  }
-
-  async function handleAddMember(memberData) {
-    if (!selected) return
-    await addMember(selected.id, {
-      ...memberData,
-      initials: initialsFrom(memberData.name),
-      user_id: null,
-    })
   }
 
   return (
@@ -301,10 +291,14 @@ export default function TeamsPage() {
               reviews={reviews}
               teamColor={selected.color}
               managerName={teamManagerName(selected.id)}
-              canEdit={canEdit}
-              onAddMember={handleAddMember}
-              onRemoveMember={(id) => removeMember(selected.id, id)}
+              canEdit={false}
             />
+            {canEdit && (
+              <p className="-mt-2 text-[11px] text-ink-faint">
+                Members are accounts on this team — add or remove them from the{' '}
+                <span className="font-semibold">People</span> page.
+              </p>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="card p-4">

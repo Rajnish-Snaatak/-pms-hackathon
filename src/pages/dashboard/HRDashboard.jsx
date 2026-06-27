@@ -118,6 +118,10 @@ export default function HRDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {teams.map((t) => {
             const teamUsers = users.filter((u) => u.team_id === t.id)
+            const mgrNames = teamUsers
+              .filter((u) => u.role === 'manager')
+              .map((u) => u.name)
+            const managerLabel = mgrNames.length ? mgrNames.join(', ') : 'No manager'
             return (
               <div key={t.id} className="card p-4 border-t-[3px]" style={{ borderTopColor: t.color }}>
                 <div className="flex items-center justify-between mb-3">
@@ -130,7 +134,7 @@ export default function HRDashboard() {
                     </span>
                     <div>
                       <p className="text-sm font-bold text-ink">{t.full_name || t.name}</p>
-                      <p className="text-[11px] text-ink-muted">Manager · {t.manager_name}</p>
+                      <p className="text-[11px] text-ink-muted">Manager · {managerLabel}</p>
                     </div>
                   </div>
                   <Badge variant="gray">{teamUsers.length} members</Badge>
