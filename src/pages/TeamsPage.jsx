@@ -19,6 +19,8 @@ export default function TeamsPage() {
   const events = useStore((s) => s.events)
   const reviews = useStore((s) => s.reviews)
   const addTeam = useStore((s) => s.addTeam)
+  const updateTeam = useStore((s) => s.updateTeam)
+  const deleteTeam = useStore((s) => s.deleteTeam)
 
   const canEdit = role === 'manager' || role === 'hr'
 
@@ -30,6 +32,11 @@ export default function TeamsPage() {
     manager_name: '',
     color: SWATCHES[0],
   })
+
+  // Edit-team modal state
+  const [editTeam, setEditTeam] = useState(null)
+  const [teamErr, setTeamErr] = useState('')
+  const [teamBusy, setTeamBusy] = useState(false)
 
   useEffect(() => {
     if (!selectedId && teams.length) setSelectedId(teams[0].id)
@@ -106,6 +113,43 @@ export default function TeamsPage() {
       setTeam({ name: '', full_name: '', manager_name: '', color: SWATCHES[0] })
       setShowTeamForm(false)
     }
+  }
+
+  function openEditTeam(t) {
+    setTeamErr('')
+    setEditTeam({
+      id: t.id,
+      name: t.name || '',
+      full_name: t.full_name || '',
+      manager_name: t.manager_name || '',
+      color: t.color || SWATCHES[0],
+    })
+  }
+
+  async function saveEditTeam(e) {
+    e.preventDefault()
+    if (!editTeam.name.trim()) return
+    setTeamErr('')
+    setTeamBusy(true)
+    const { error } = await updateTeam(editTeam.id, {
+      name: editTeam.name.trim().slice(0, 8),
+      full_name: editTeam.full_name.trim() || null,
+      manager_name: editTeam.manager_name || null,
+      color: editTeam.color,
+    })
+    setTeamBusy(false)
+    if (error) return setTeamErr(error)
+    setEditTeam(null)
+  }
+
+  async function handleDeleteTeam(t) {
+    if (!window.confirm(`Delete team "${t.name}"? This cannot be undone.`)) return
+    const { error } = await deleteTeam(t.id)
+    if (error) {
+      window.alert(error)
+      return
+    }
+    if (selectedId === t.id) setSelectedId(teams.find((x) => x.id !== t.id)?.id || '')
   }
 
   return (
@@ -252,17 +296,52 @@ export default function TeamsPage() {
         {selected ? (
           <div className="space-y-4 min-w-0">
             <div className="card p-4">
-              <div className="flex items-center gap-3">
+              <div className="flex items-start gap-3">
                 <span
                   className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-base font-bold text-white"
                   style={{ background: selected.color }}
                 >
                   {selected.name.slice(0, 2).toUpperCase()}
                 </span>
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="text-base font-bold text-ink">{selected.full_name || selected.name}</p>
                   <p className="text-xs text-ink-muted">Manager · {teamManagerName(selected.id)}</p>
                 </div>
+                {canEdit && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => openEditTeam(selected)}
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-ink-muted hover:bg-surface hover:text-ink"
+                      title="Edit team"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+                        <path
+                          d="M4 13.5V16h2.5l7.4-7.4-2.5-2.5L4 13.5zM15.7 6.3a1 1 0 000-1.4l-1.6-1.6a1 1 0 00-1.4 0l-1.2 1.2 2.5 2.5 1.7-1.7z"
+                          stroke="currentColor"
+                          strokeWidth="1.3"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteTeam(selected)}
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-danger hover:bg-[#fce8e6]"
+                      title="Delete team"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+                        <path
+                          d="M4 6h12M8 6V4.5A1.5 1.5 0 019.5 3h1A1.5 1.5 0 0112 4.5V6m-6 0v9a1.5 1.5 0 001.5 1.5h5A1.5 1.5 0 0014 15V6"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      Delete
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="mt-4 grid grid-cols-4 gap-3 text-center">
                 <div>
@@ -351,6 +430,97 @@ export default function TeamsPage() {
           </div>
         )}
       </div>
+
+      {/* Edit team modal */}
+      {editTeam && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4"
+          onClick={() => !teamBusy && setEditTeam(null)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={saveEditTeam}
+            className="card w-full max-w-md p-5 space-y-3"
+          >
+            <h3 className="text-base font-bold text-ink">Edit team</h3>
+
+            {teamErr && (
+              <div className="rounded-lg border-l-[3px] border-l-danger bg-[#fce8e6] px-3 py-2 text-sm text-[#c5221f]">
+                {teamErr}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Short name (max 8)</label>
+                <input
+                  className="input"
+                  maxLength={8}
+                  value={editTeam.name}
+                  onChange={(e) => setEditTeam({ ...editTeam, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Full name</label>
+                <input
+                  className="input"
+                  value={editTeam.full_name}
+                  onChange={(e) => setEditTeam({ ...editTeam, full_name: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="label">Manager</label>
+              <select
+                className="input"
+                value={editTeam.manager_name}
+                onChange={(e) => setEditTeam({ ...editTeam, manager_name: e.target.value })}
+              >
+                <option value="">Select manager…</option>
+                {managerOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label">Color</label>
+              <div className="flex gap-2">
+                {SWATCHES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setEditTeam({ ...editTeam, color: c })}
+                    className={`h-7 w-7 rounded-full transition-transform ${
+                      editTeam.color === c ? 'ring-2 ring-offset-2 ring-ink scale-110' : ''
+                    }`}
+                    style={{ background: c }}
+                    aria-label={c}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button type="submit" className="btn-primary" disabled={teamBusy}>
+                {teamBusy ? 'Saving…' : 'Save changes'}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setEditTeam(null)}
+                disabled={teamBusy}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

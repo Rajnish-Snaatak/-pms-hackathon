@@ -314,6 +314,38 @@ export const useStore = create((set, get) => ({
     return data
   },
 
+  updateTeam: async (id, changes) => {
+    const { data, error } = await supabase
+      .from('teams')
+      .update(changes)
+      .eq('id', id)
+      .select()
+      .single()
+    if (error) return { error: error.message }
+    set((s) => ({ teams: s.teams.map((t) => (t.id === id ? data : t)) }))
+    return { team: data }
+  },
+
+  deleteTeam: async (id) => {
+    // Block deletion while the team still has member accounts.
+    const memberCount = get().users.filter((u) => u.team_id === id).length
+    if (memberCount > 0) {
+      return {
+        error: `This team still has ${memberCount} member${
+          memberCount === 1 ? '' : 's'
+        }. Reassign or remove them (via People) first.`,
+      }
+    }
+    // Clear stray references so the FK delete succeeds, then delete the team.
+    await supabase.from('events').update({ team_id: null }).eq('team_id', id)
+    await supabase.from('goals').update({ team_id: null }).eq('team_id', id)
+    await supabase.from('team_members').delete().eq('team_id', id)
+    const { error } = await supabase.from('teams').delete().eq('id', id)
+    if (error) return { error: error.message }
+    set((s) => ({ teams: s.teams.filter((t) => t.id !== id) }))
+    return { id }
+  },
+
   // ---- Team members --------------------------------------------------------
   addMember: async (teamId, memberData) => {
     const { data, error } = await supabase
