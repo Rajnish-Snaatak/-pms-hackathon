@@ -18,11 +18,15 @@ export default function ManagerDashboard() {
   const approveGoal = useStore((s) => s.approveGoal)
   const rejectGoal = useStore((s) => s.rejectGoal)
 
-  // Direct reports: employees managed by the current manager.
+  // Direct reports: employees on the manager's team (with legacy manager_name
+  // fallback for seeded data).
   const reports = useMemo(
     () =>
       users.filter(
-        (u) => u.role === 'employee' && u.manager_name === currentUser?.name
+        (u) =>
+          u.role === 'employee' &&
+          ((currentUser?.teamId && u.team_id === currentUser.teamId) ||
+            (u.manager_name && u.manager_name === currentUser?.name))
       ),
     [users, currentUser]
   )

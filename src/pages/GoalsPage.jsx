@@ -20,8 +20,16 @@ export default function GoalsPage() {
   const [filter, setFilter] = useState('All')
   const [showForm, setShowForm] = useState(false)
 
+  // A manager's reports are employees on their team (matching team_id), with a
+  // fallback to the legacy manager_name text for seeded data.
   const reports = useMemo(
-    () => users.filter((u) => u.role === 'employee' && u.manager_name === currentUser?.name),
+    () =>
+      users.filter(
+        (u) =>
+          u.role === 'employee' &&
+          ((currentUser?.teamId && u.team_id === currentUser.teamId) ||
+            (u.manager_name && u.manager_name === currentUser?.name))
+      ),
     [users, currentUser]
   )
 

@@ -25,7 +25,13 @@ export default function TimelinePage() {
   const [showForm, setShowForm] = useState(false)
 
   const reports = useMemo(
-    () => users.filter((u) => u.role === 'employee' && u.manager_name === currentUser?.name),
+    () =>
+      users.filter(
+        (u) =>
+          u.role === 'employee' &&
+          ((currentUser?.teamId && u.team_id === currentUser.teamId) ||
+            (u.manager_name && u.manager_name === currentUser?.name))
+      ),
     [users, currentUser]
   )
 
