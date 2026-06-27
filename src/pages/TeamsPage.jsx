@@ -48,6 +48,16 @@ export default function TeamsPage() {
 
   const membersOf = (teamId) => teamMembers[teamId] || []
 
+  // Derive the team's manager(s) from the actual manager users assigned to the
+  // team, falling back to the team's stored manager_name text.
+  const teamManagerName = (teamId) => {
+    const mgrs = users
+      .filter((u) => u.role === 'manager' && u.team_id === teamId)
+      .map((u) => u.name)
+    if (mgrs.length) return mgrs.join(', ')
+    return teams.find((t) => t.id === teamId)?.manager_name || '—'
+  }
+
   const reviewPctOf = (teamId) => {
     const m = membersOf(teamId).filter((x) => x.user_id)
     if (m.length === 0) return 0
@@ -75,11 +85,12 @@ export default function TeamsPage() {
     ? events.filter((e) => e.team_id === selected.id).length
     : 0
 
+  // Live manager list: actual manager users (no stale team text).
   const managerOptions = useMemo(() => {
-    const fromUsers = users.filter((u) => u.role === 'manager').map((u) => u.name)
-    const fromTeams = teams.map((t) => t.manager_name).filter(Boolean)
-    return [...new Set([...fromUsers, ...fromTeams])]
-  }, [users, teams])
+    return [
+      ...new Set(users.filter((u) => u.role === 'manager').map((u) => u.name)),
+    ].sort((a, b) => a.localeCompare(b))
+  }, [users])
 
   async function createTeam(e) {
     e.preventDefault()
@@ -235,7 +246,9 @@ export default function TeamsPage() {
                 <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: t.color }} />
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm font-semibold text-ink truncate">{t.name}</span>
-                  <span className="block text-[11px] text-ink-faint">{membersOf(t.id).length} members</span>
+                  <span className="block text-[11px] text-ink-faint truncate">
+                    {membersOf(t.id).length} members · {teamManagerName(t.id)}
+                  </span>
                 </span>
                 <Badge variant={reviewPctOf(t.id) >= 80 ? 'green' : reviewPctOf(t.id) >= 50 ? 'yellow' : 'gray'}>
                   {reviewPctOf(t.id)}%
@@ -258,7 +271,7 @@ export default function TeamsPage() {
                 </span>
                 <div>
                   <p className="text-base font-bold text-ink">{selected.full_name || selected.name}</p>
-                  <p className="text-xs text-ink-muted">Manager · {selected.manager_name || '—'}</p>
+                  <p className="text-xs text-ink-muted">Manager · {teamManagerName(selected.id)}</p>
                 </div>
               </div>
               <div className="mt-4 grid grid-cols-4 gap-3 text-center">
@@ -287,6 +300,7 @@ export default function TeamsPage() {
               events={events}
               reviews={reviews}
               teamColor={selected.color}
+              managerName={teamManagerName(selected.id)}
               canEdit={canEdit}
               onAddMember={handleAddMember}
               onRemoveMember={(id) => removeMember(selected.id, id)}

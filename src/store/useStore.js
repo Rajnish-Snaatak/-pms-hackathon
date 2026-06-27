@@ -9,6 +9,7 @@ function toCurrentUser(user, teams) {
     id: user.id,
     name: user.name,
     initials: user.initials,
+    email: user.email,
     team: team ? team.name : null,
     teamId: user.team_id,
     role: user.role,
@@ -63,8 +64,10 @@ export const useStore = create((set, get) => ({
       const teams = teamsRes.data || []
       const users = usersRes.data || []
 
-      // Default to the employee user on first load.
-      const employee = users.find((u) => u.role === 'employee')
+      // Restore the Supabase Auth session (if any) and map it to a profile.
+      const { data: sessionData } = await supabase.auth.getSession()
+      const authId = sessionData?.session?.user?.id
+      const sessionUser = authId ? users.find((u) => u.auth_id === authId) : null
 
       set({
         teams,
@@ -73,8 +76,8 @@ export const useStore = create((set, get) => ({
         events: eventsRes.data || [],
         reviews: reviewsRes.data || [],
         teamMembers: groupMembers(tmRes.data || []),
-        currentUser: toCurrentUser(employee, teams),
-        currentRole: 'employee',
+        currentUser: sessionUser ? toCurrentUser(sessionUser, teams) : null,
+        currentRole: sessionUser ? sessionUser.role : 'employee',
         loading: false,
       })
     } catch (err) {
@@ -82,11 +85,117 @@ export const useStore = create((set, get) => ({
     }
   },
 
-  // ---- Role switching ------------------------------------------------------
-  setRole: (role) => {
-    const { users, teams } = get()
-    const user = users.find((u) => u.role === role)
-    set({ currentRole: role, currentUser: toCurrentUser(user, teams) })
+  // ---- Auth (real Supabase email/password) ---------------------------------
+  signIn: async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    })
+    if (error) return { error: error.message }
+
+    // Make sure profiles are loaded, then map the auth user -> profile.
+    let { users, teams } = get()
+    if (users.length === 0) {
+      const res = await supabase.from('users').select('*').order('created_at')
+      users = res.data || []
+      set({ users })
+    }
+    const user = users.find((u) => u.auth_id === data.user.id)
+    if (!user) {
+      await supabase.auth.signOut()
+      return { error: 'No PerfTrail profile is linked to this account.' }
+    }
+    set({ currentUser: toCurrentUser(user, teams), currentRole: user.role })
+    return {}
+  },
+
+  signOut: async () => {
+    await supabase.auth.signOut()
+    set({ currentUser: null, currentRole: 'employee' })
+  },
+
+  // Self-service password change. Verifies the current password first by
+  // re-authenticating, then updates to the new one.
+  changePassword: async (currentPassword, newPassword) => {
+    const { currentUser } = get()
+    if (!currentUser?.email) return { error: 'You are not signed in.' }
+    const { error: vErr } = await supabase.auth.signInWithPassword({
+      email: currentUser.email,
+      password: currentPassword,
+    })
+    if (vErr) return { error: 'Current password is incorrect.' }
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) return { error: error.message }
+    return {}
+  },
+
+  // Re-pull users after an admin adds someone (keeps the list fresh).
+  refreshUsers: async () => {
+    const res = await supabase.from('users').select('*').order('created_at')
+    if (!res.error) set({ users: res.data || [] })
+    return res.data || []
+  },
+
+  // ---- Admin: create a new account (HR / Manager) --------------------------
+  // Calls the create-user Edge Function (runs with the service role key).
+  createUser: async (payload) => {
+    const { data, error } = await supabase.functions.invoke('create-user', {
+      body: payload,
+    })
+    // functions.invoke surfaces non-2xx as an error with the response body.
+    if (error) {
+      let msg = error.message
+      try {
+        const ctx = await error.context?.json?.()
+        if (ctx?.error) msg = ctx.error
+      } catch (_) {}
+      return { error: msg }
+    }
+    if (data?.error) return { error: data.error }
+    if (data?.user) {
+      set((s) => ({ users: [...s.users, data.user] }))
+    }
+    return { user: data?.user }
+  },
+
+  // ---- Admin: edit an account (HR / Manager) -------------------------------
+  updateUser: async (id, changes) => {
+    const { data, error } = await supabase.functions.invoke('update-user', {
+      body: { id, ...changes },
+    })
+    if (error) {
+      let msg = error.message
+      try {
+        const ctx = await error.context?.json?.()
+        if (ctx?.error) msg = ctx.error
+      } catch (_) {}
+      return { error: msg }
+    }
+    if (data?.error) return { error: data.error }
+    if (data?.user) {
+      set((s) => ({
+        users: s.users.map((u) => (u.id === id ? data.user : u)),
+      }))
+    }
+    return { user: data?.user }
+  },
+
+  // ---- Admin: delete an account (HR / Manager) -----------------------------
+  deleteUser: async (id) => {
+    const { data, error } = await supabase.functions.invoke('delete-user', {
+      body: { id },
+    })
+    if (error) {
+      let msg = error.message
+      try {
+        const ctx = await error.context?.json?.()
+        if (ctx?.error) msg = ctx.error
+      } catch (_) {}
+      return { error: msg }
+    }
+    if (data?.error) return { error: data.error }
+    set((s) => ({ users: s.users.filter((u) => u.id !== id) }))
+    return { id }
   },
 
   // ---- Goals ---------------------------------------------------------------

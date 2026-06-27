@@ -10,6 +10,8 @@ import GoalsPage from './pages/GoalsPage'
 import TimelinePage from './pages/TimelinePage'
 import ReviewPage from './pages/ReviewPage'
 import TeamsPage from './pages/TeamsPage'
+import PeoplePage from './pages/PeoplePage'
+import LoginPage from './pages/LoginPage'
 
 export function Spinner({ label = 'Loading…' }) {
   return (
@@ -53,6 +55,11 @@ export default function App() {
     )
   }
 
+  // Not signed in — show the login screen.
+  if (!currentUser) {
+    return <LoginPage />
+  }
+
   return (
     <div className="min-h-screen">
       <TopNav />
@@ -75,6 +82,14 @@ export default function App() {
             element={
               <ManagerOrHR>
                 <TeamsPage />
+              </ManagerOrHR>
+            }
+          />
+          <Route
+            path="/people"
+            element={
+              <ManagerOrHR>
+                <PeoplePage />
               </ManagerOrHR>
             }
           />

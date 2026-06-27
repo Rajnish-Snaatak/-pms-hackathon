@@ -25,6 +25,7 @@ export default function MemberTable({
   events = [],
   reviews = [],
   teamColor = '#4285f4',
+  managerName = null,
   canEdit = false,
   onAddMember,
   onRemoveMember,
@@ -145,7 +146,7 @@ export default function MemberTable({
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-ink-muted">{m.role_title || '—'}</td>
-                  <td className="px-3 py-2.5 text-ink-muted">{m.manager_name || '—'}</td>
+                  <td className="px-3 py-2.5 text-ink-muted">{managerName || m.manager_name || '—'}</td>
                   <td className="px-3 py-2.5 tabular-nums">{m.goalCount}</td>
                   <td className="px-3 py-2.5">
                     <ProgressBar value={m.avg} showLabel />

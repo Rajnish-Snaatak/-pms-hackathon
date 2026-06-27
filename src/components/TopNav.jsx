@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useStore } from '../store/useStore'
+import ChangePasswordModal from './ChangePasswordModal'
 
 const ROLE_META = {
   employee: { label: 'Employee', color: '#4285f4', bg: '#e8f0fe' },
@@ -14,14 +15,16 @@ const LINKS = [
   { to: '/timeline', label: 'Timeline' },
   { to: '/review', label: 'Review' },
   { to: '/teams', label: 'Teams', hideFor: ['employee'] },
+  { to: '/people', label: 'People', hideFor: ['employee'] },
 ]
 
 export default function TopNav() {
   const currentRole = useStore((s) => s.currentRole)
   const currentUser = useStore((s) => s.currentUser)
-  const setRole = useStore((s) => s.setRole)
+  const signOut = useStore((s) => s.signOut)
 
   const [open, setOpen] = useState(false)
+  const [showPw, setShowPw] = useState(false)
   const ref = useRef(null)
 
   useEffect(() => {
@@ -97,35 +100,56 @@ export default function TopNav() {
           </button>
 
           {open && (
-            <div className="absolute right-0 mt-2 w-52 card shadow-pop p-1.5 z-40">
-              <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-                Switch role
-              </p>
-              {Object.entries(ROLE_META).map(([role, m]) => (
-                <button
-                  key={role}
-                  onClick={() => {
-                    setRole(role)
-                    setOpen(false)
-                  }}
-                  className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-surface ${
-                    role === currentRole ? 'bg-surface' : ''
-                  }`}
+            <div className="absolute right-0 mt-2 w-56 card shadow-pop p-1.5 z-40">
+              <div className="px-2 py-1.5">
+                <p className="text-sm font-bold text-ink truncate">{currentUser?.name}</p>
+                <p className="text-[11px] text-ink-faint truncate">{currentUser?.email}</p>
+                <span
+                  className="pill mt-1 px-1.5 py-0 text-[10px]"
+                  style={{ background: meta.bg, color: meta.color }}
                 >
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ background: m.color }}
+                  {meta.label}
+                </span>
+              </div>
+
+              <div className="my-1 border-t border-line" />
+              <button
+                onClick={() => {
+                  setShowPw(true)
+                  setOpen(false)
+                }}
+                className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink hover:bg-surface"
+              >
+                <svg width="15" height="15" viewBox="0 0 20 20" fill="none" className="shrink-0">
+                  <rect x="4" y="9" width="12" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+                  <path d="M7 9V6.5a3 3 0 016 0V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+                <span className="font-semibold">Change password</span>
+              </button>
+              <button
+                onClick={() => {
+                  signOut()
+                  setOpen(false)
+                }}
+                className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-danger hover:bg-surface"
+              >
+                <svg width="15" height="15" viewBox="0 0 20 20" fill="none" className="shrink-0">
+                  <path
+                    d="M13 7V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h6a2 2 0 002-2v-2M9 10h8m0 0l-3-3m3 3l-3 3"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
-                  <span className="font-semibold text-ink">{m.label}</span>
-                  {role === currentRole && (
-                    <span className="ml-auto text-[11px] text-ink-faint">current</span>
-                  )}
-                </button>
-              ))}
+                </svg>
+                <span className="font-semibold">Log out</span>
+              </button>
             </div>
           )}
         </div>
       </div>
+
+      {showPw && <ChangePasswordModal onClose={() => setShowPw(false)} />}
     </header>
   )
 }
