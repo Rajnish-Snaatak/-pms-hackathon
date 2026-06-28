@@ -111,6 +111,25 @@ export const useStore = create((set, get) => ({
     set({ currentUser: null, currentRole: 'employee' })
   },
 
+  // Self-serve signup: creates a new organization + its first admin, then
+  // signs that admin in.
+  createOrganization: async ({ orgName, name, email, password }) => {
+    const { data, error } = await supabase.functions.invoke('create-organization', {
+      body: { orgName, name, email, password },
+    })
+    if (error) {
+      let msg = error.message
+      try {
+        const ctx = await error.context?.json?.()
+        if (ctx?.error) msg = ctx.error
+      } catch (_) {}
+      return { error: msg }
+    }
+    if (data?.error) return { error: data.error }
+    // Log the new admin straight in.
+    return await get().signIn(email, password)
+  },
+
   // Self-service password change. Verifies the current password first by
   // re-authenticating, then updates to the new one.
   changePassword: async (currentPassword, newPassword) => {

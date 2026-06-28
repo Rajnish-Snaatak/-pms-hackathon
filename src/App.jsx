@@ -12,6 +12,7 @@ import ReviewPage from './pages/ReviewPage'
 import TeamsPage from './pages/TeamsPage'
 import PeoplePage from './pages/PeoplePage'
 import LoginPage from './pages/LoginPage'
+import SignupPage from './pages/SignupPage'
 
 export function Spinner({ label = 'Loading…' }) {
   return (
@@ -55,9 +56,14 @@ export default function App() {
     )
   }
 
-  // Not signed in — show the login screen.
+  // Not signed in — show login, with a public route for org signup.
   if (!currentUser) {
-    return <LoginPage />
+    return (
+      <Routes>
+        <Route path="/signup" element={<SignupPage />} />
+        <Route path="*" element={<LoginPage />} />
+      </Routes>
+    )
   }
 
   return (
