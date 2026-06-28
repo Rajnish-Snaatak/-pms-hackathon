@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
     // Look up the caller's profile (role decides permissions).
     const { data: caller } = await admin
       .from('users')
-      .select('role, team_id')
+      .select('role, team_id, organization_id')
       .eq('auth_id', user.id)
       .single()
     if (!caller) return json({ error: 'No profile linked to caller' }, 403)
@@ -79,12 +79,16 @@ Deno.serve(async (req) => {
     // Managers can only add into their own team.
     const team_id = caller.role === 'manager' ? caller.team_id : reqTeamId
 
+    // New accounts inherit the creator's organization.
+    const organization_id = caller.organization_id
+
     // Create the auth user (confirmed so they can log in immediately).
     const { data: created, error: cErr } = await admin.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
       user_metadata: { name, role },
+      app_metadata: { organization_id, role },
     })
     if (cErr) return json({ error: cErr.message }, 400)
 
@@ -97,7 +101,16 @@ Deno.serve(async (req) => {
 
     const { data: profile, error: pErr } = await admin
       .from('users')
-      .insert({ name, email, role, team_id, title, initials, auth_id: created.user.id })
+      .insert({
+        name,
+        email,
+        role,
+        team_id,
+        title,
+        initials,
+        auth_id: created.user.id,
+        organization_id,
+      })
       .select()
       .single()
 
