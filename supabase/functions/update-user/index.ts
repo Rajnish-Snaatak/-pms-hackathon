@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
 
     const { data: caller } = await admin
       .from('users')
-      .select('id, role, team_id')
+      .select('id, role, team_id, organization_id')
       .eq('auth_id', user.id)
       .single()
     if (!caller) return json({ error: 'No profile linked to caller' }, 403)
@@ -55,10 +55,14 @@ Deno.serve(async (req) => {
 
     const { data: target } = await admin
       .from('users')
-      .select('id, role, team_id, auth_id')
+      .select('id, role, team_id, auth_id, organization_id')
       .eq('id', targetId)
       .single()
     if (!target) return json({ error: 'User not found' }, 404)
+
+    // Tenant isolation: can only act on users in your own organization.
+    if (target.organization_id !== caller.organization_id)
+      return json({ error: 'User not found' }, 404)
 
     // Permission: HR edits anyone; Manager edits employees on their own team.
     const canEdit =

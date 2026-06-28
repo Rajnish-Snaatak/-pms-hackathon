@@ -14,6 +14,7 @@ function toCurrentUser(user, teams) {
     teamId: user.team_id,
     role: user.role,
     title: user.title,
+    organizationId: user.organization_id,
   }
 }
 
@@ -42,6 +43,11 @@ export const useStore = create((set, get) => ({
   loadAll: async () => {
     set({ loading: true, error: null })
     try {
+      // Resolve the session FIRST so RLS-scoped queries run as the logged-in
+      // user (and thus return only their organization's rows).
+      const { data: sessionData } = await supabase.auth.getSession()
+      const authId = sessionData?.session?.user?.id
+
       const [teamsRes, usersRes, goalsRes, eventsRes, reviewsRes, tmRes] =
         await Promise.all([
           supabase.from('teams').select('*').order('created_at'),
@@ -63,10 +69,6 @@ export const useStore = create((set, get) => ({
 
       const teams = teamsRes.data || []
       const users = usersRes.data || []
-
-      // Restore the Supabase Auth session (if any) and map it to a profile.
-      const { data: sessionData } = await supabase.auth.getSession()
-      const authId = sessionData?.session?.user?.id
       const sessionUser = authId ? users.find((u) => u.auth_id === authId) : null
 
       set({
@@ -87,25 +89,20 @@ export const useStore = create((set, get) => ({
 
   // ---- Auth (real Supabase email/password) ---------------------------------
   signIn: async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
     })
     if (error) return { error: error.message }
 
-    // Make sure profiles are loaded, then map the auth user -> profile.
-    let { users, teams } = get()
-    if (users.length === 0) {
-      const res = await supabase.from('users').select('*').order('created_at')
-      users = res.data || []
-      set({ users })
-    }
-    const user = users.find((u) => u.auth_id === data.user.id)
-    if (!user) {
+    // Reload data now that we're authenticated — under RLS this returns only
+    // the user's organization, and sets currentUser from the session.
+    await get().loadAll()
+    if (!get().currentUser) {
       await supabase.auth.signOut()
+      set({ currentUser: null })
       return { error: 'No PerfTrail profile is linked to this account.' }
     }
-    set({ currentUser: toCurrentUser(user, teams), currentRole: user.role })
     return {}
   },
 
@@ -202,7 +199,7 @@ export const useStore = create((set, get) => ({
   addGoal: async (goalData) => {
     const { data, error } = await supabase
       .from('goals')
-      .insert(goalData)
+      .insert({ ...goalData, organization_id: get().currentUser?.organizationId })
       .select()
       .single()
     if (error) {
@@ -251,7 +248,7 @@ export const useStore = create((set, get) => ({
   addEvent: async (eventData) => {
     const { data, error } = await supabase
       .from('events')
-      .insert(eventData)
+      .insert({ ...eventData, organization_id: get().currentUser?.organizationId })
       .select()
       .single()
     if (error) {
@@ -272,6 +269,7 @@ export const useStore = create((set, get) => ({
       rating,
       comment,
       status,
+      organization_id: currentUser?.organizationId,
     }
 
     if (existing) {
@@ -303,7 +301,7 @@ export const useStore = create((set, get) => ({
   addTeam: async (teamData) => {
     const { data, error } = await supabase
       .from('teams')
-      .insert(teamData)
+      .insert({ ...teamData, organization_id: get().currentUser?.organizationId })
       .select()
       .single()
     if (error) {
@@ -350,7 +348,11 @@ export const useStore = create((set, get) => ({
   addMember: async (teamId, memberData) => {
     const { data, error } = await supabase
       .from('team_members')
-      .insert({ ...memberData, team_id: teamId })
+      .insert({
+        ...memberData,
+        team_id: teamId,
+        organization_id: get().currentUser?.organizationId,
+      })
       .select()
       .single()
     if (error) {
