@@ -30,6 +30,7 @@ function groupMembers(rows) {
 export const useStore = create((set, get) => ({
   currentRole: 'employee',
   currentUser: null,
+  organization: null,
   teams: [],
   users: [],
   goals: [],
@@ -48,7 +49,7 @@ export const useStore = create((set, get) => ({
       const { data: sessionData } = await supabase.auth.getSession()
       const authId = sessionData?.session?.user?.id
 
-      const [teamsRes, usersRes, goalsRes, eventsRes, reviewsRes, tmRes] =
+      const [teamsRes, usersRes, goalsRes, eventsRes, reviewsRes, tmRes, orgRes] =
         await Promise.all([
           supabase.from('teams').select('*').order('created_at'),
           supabase.from('users').select('*').order('created_at'),
@@ -56,6 +57,7 @@ export const useStore = create((set, get) => ({
           supabase.from('events').select('*').order('created_at', { ascending: false }),
           supabase.from('reviews').select('*').order('created_at'),
           supabase.from('team_members').select('*'),
+          supabase.from('organizations').select('*'),
         ])
 
       const firstError =
@@ -64,7 +66,8 @@ export const useStore = create((set, get) => ({
         goalsRes.error ||
         eventsRes.error ||
         reviewsRes.error ||
-        tmRes.error
+        tmRes.error ||
+        orgRes.error
       if (firstError) throw firstError
 
       const teams = teamsRes.data || []
@@ -78,6 +81,8 @@ export const useStore = create((set, get) => ({
         events: eventsRes.data || [],
         reviews: reviewsRes.data || [],
         teamMembers: groupMembers(tmRes.data || []),
+        // Under RLS this returns only the caller's organization.
+        organization: orgRes.data?.[0] || null,
         currentUser: sessionUser ? toCurrentUser(sessionUser, teams) : null,
         currentRole: sessionUser ? sessionUser.role : 'employee',
         loading: false,
@@ -108,7 +113,7 @@ export const useStore = create((set, get) => ({
 
   signOut: async () => {
     await supabase.auth.signOut()
-    set({ currentUser: null, currentRole: 'employee' })
+    set({ currentUser: null, currentRole: 'employee', organization: null })
   },
 
   // Self-serve signup: creates a new organization + its first admin, then

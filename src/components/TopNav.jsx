@@ -21,6 +21,7 @@ const LINKS = [
 export default function TopNav() {
   const currentRole = useStore((s) => s.currentRole)
   const currentUser = useStore((s) => s.currentUser)
+  const organization = useStore((s) => s.organization)
   const signOut = useStore((s) => s.signOut)
 
   const [open, setOpen] = useState(false)
@@ -46,7 +47,9 @@ export default function TopNav() {
               <span className="text-ink">Perf</span>
               <span className="text-brand">Trail</span>
             </span>
-            <span className="pill bg-[#e8f0fe] text-[#1a73e8]">Opstree</span>
+            <span className="pill bg-[#e8f0fe] text-[#1a73e8]">
+            {organization?.name || '—'}
+          </span>
           </div>
 
           <nav className="hidden sm:flex items-center gap-1">
