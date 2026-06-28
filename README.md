@@ -1,10 +1,10 @@
 # 📈 PerfTrail — Performance Management System
 
-`React` · `Vite` · `Tailwind CSS` · `Zustand` · `Supabase` · `PostgreSQL`
+`React` · `Vite` · `Tailwind CSS` · `Zustand` · `Supabase` · `PostgreSQL` · `Multi-Tenant`
 
 🌐 **Live Demo → [perftrail.vercel.app](https://perftrail.vercel.app)**
 
-A full-stack, role-based **Performance Management System** built for Opstree in a hackathon. Manages the complete performance cycle — goal setting, progress tracking, evidence timelines, and manager reviews — across three roles (**Employee, Manager, HR**) with real authentication and UI-driven user administration.
+A full-stack, role-based **Performance Management System** built as a **multi-tenant SaaS**. Manages the complete performance cycle — goal setting, progress tracking, evidence timelines, and manager reviews — across three roles (**Employee, Manager, HR**), with real authentication, UI-driven user administration, and full per-organization data isolation. Any company can sign up and get its own private workspace.
 
 ---
 
@@ -12,6 +12,7 @@ A full-stack, role-based **Performance Management System** built for Opstree in 
 
 - [Overview](#-overview)
 - [Architecture](#-architecture)
+- [Multi-Tenancy](#-multi-tenancy)
 - [Roles & Permissions](#-roles--permissions)
 - [Goal-Type Logic](#-goal-type-logic)
 - [Features](#-features)
@@ -29,12 +30,13 @@ A full-stack, role-based **Performance Management System** built for Opstree in 
 
 PerfTrail handles every stage of an employee's performance cycle — from a manager assigning core goals, to the employee logging progress and evidence, to the manager writing the final review — with HR overseeing the whole organisation.
 
-Built as a hackathon MVP with a focus on:
+Built as a hackathon MVP, then evolved into a multi-tenant SaaS, with a focus on:
 
 - A working, **demo-ready** product over feature completeness
 - **Real authentication** (Supabase Auth) with per-role access
+- **Multi-tenant isolation** — each organization's data is private, enforced by Postgres Row Level Security
+- **Self-serve onboarding** — any company can create its own workspace
 - **UI-driven administration** — create, edit, and delete user accounts without touching the database
-- A clean, role-aware single-page app with minimal dependencies
 
 ---
 
@@ -42,13 +44,14 @@ Built as a hackathon MVP with a focus on:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         SIGN-IN (public)                              │
+│                     PUBLIC (signed out)                               │
 │                                                                        │
-│   /login  →  Supabase Auth (email + password, JWT session)           │
+│   /login   →  Supabase Auth (email + password, JWT session)          │
+│   /signup  →  Create a new organization + its first HR admin         │
 └──────────────────────────────────────────────────────────────────────┘
                                     │
 ┌──────────────────────────────────────────────────────────────────────┐
-│                    ROLE-AWARE APP (authenticated)                     │
+│              ROLE-AWARE APP (authenticated, scoped to org)            │
 │                                                                        │
 │  ┌───────────┐ ┌────────┐ ┌──────────┐ ┌────────┐ ┌───────┐ ┌──────┐ │
 │  │ Dashboard │ │ Goals  │ │ Timeline │ │ Review │ │ Teams │ │People│ │
@@ -66,18 +69,46 @@ Built as a hackathon MVP with a focus on:
 ┌──────────────────────────────────────────────────────────────────────┐
 │                             Supabase                                   │
 │                                                                        │
-│   Supabase Auth (JWT)        PostgreSQL                               │
-│   • Email + password         • teams / users / goals / events         │
-│   • Sessions & self-serve      reviews / team_members                 │
-│     password change          • users linked to auth.users (auth_id)   │
+│   Supabase Auth (JWT)        PostgreSQL + Row Level Security          │
+│   • Email + password         • organizations (tenant root)            │
+│   • app_metadata: org + role • every table has organization_id        │
+│   • Sessions & self-serve    • RLS: rows visible only where           │
+│     password change            organization_id = current_org_id()     │
+│                              • teams/users/goals/events/reviews/...    │
 │                                                                        │
-│   Edge Functions (Deno, service-role) — admin user management:        │
-│   • create-user   • update-user   • delete-user                       │
-│     (permission matrix enforced server-side)                          │
+│   Edge Functions (Deno, service-role) — privileged + tenant-aware:    │
+│   • create-organization (public signup)                               │
+│   • create-user · update-user · delete-user (same-org enforced)       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-The **service-role key never reaches the browser** — all privileged account operations run inside Supabase Edge Functions, which verify the caller's JWT and role before acting.
+**Two layers of isolation:**
+- **In the browser** — the anon key is RLS-restricted; every query is automatically scoped to the logged-in user's organization via `current_org_id()`.
+- **In Edge Functions** — the service-role key bypasses RLS, so each function re-checks that the caller and target belong to the **same organization** in code. The service-role key never reaches the browser.
+
+---
+
+## 🏢 Multi-Tenancy
+
+PerfTrail uses **pooled multi-tenancy**: one database, one `organization_id` on every tenant table, and **Row Level Security** to guarantee each org only ever sees its own rows. The application logic (roles, goals, reviews, People/Teams admin) is identical for every tenant — isolation happens transparently at the database layer.
+
+**How it works**
+- An **`organizations`** table is the tenant root; every other table carries `organization_id NOT NULL`.
+- A `SECURITY DEFINER` function **`current_org_id()`** resolves the caller's org from `auth.uid()`.
+- **RLS policies** on all tables enforce `organization_id = current_org_id()` for select / insert / update / delete.
+- New users are stamped with their creator's org (in the profile **and** the auth user's `app_metadata`).
+- **Self-serve signup** (`/signup`) creates a fresh org + its first HR admin via the `create-organization` Edge Function.
+
+**Verified isolation** — signed in to org A you cannot read *or* write any of org B's data; an unauthenticated client sees nothing.
+
+The rollout is split into reproducible, low-risk phases under `supabase/migrations/`:
+
+| Migration | Phase | What it does |
+| --------- | :---: | ------------ |
+| `001_multitenant_phase0.sql` | 0 | `organizations` table + `organization_id` columns, backfill default org |
+| `002_multitenant_phase1.sql` | 1 | `current_org_id()` function (used by RLS) |
+| `003_multitenant_phase2_rls.sql` | 2 | Enable RLS + org-isolation policies on all tables |
+| `004_multitenant_phase4_notnull.sql` | 4 | `organization_id NOT NULL` invariant |
 
 ---
 
@@ -113,6 +144,11 @@ Core goals are assigned top-down and weighted; additional goals are self-driven 
 ---
 
 ## ✨ Features
+
+### 🏢 Organizations (multi-tenant)
+- **Self-serve signup** (`/signup`) — create a new company workspace and become its HR admin
+- **Complete data isolation** — each org sees only its own teams, people, goals, and reviews (RLS-enforced)
+- **Org name shown in the nav** so users always know which workspace they're in
 
 ### 🔐 Authentication
 - **Email + password sign-in** via Supabase Auth (hashed passwords, JWT sessions)
@@ -166,7 +202,8 @@ Core goals are assigned top-down and weighted; additional goals are self-driven 
 | Styling          | Tailwind CSS v3           | Utility-first responsive UI               |
 | Database         | Supabase (PostgreSQL)     | Data persistence                          |
 | Auth             | Supabase Auth             | Email/password login, JWT sessions        |
-| Admin functions  | Supabase Edge Functions   | Server-side user management (service role)|
+| Multi-tenancy    | Postgres Row Level Security | Per-organization data isolation         |
+| Admin functions  | Supabase Edge Functions   | Server-side user/org management (service role)|
 | Client SDK       | @supabase/supabase-js     | Browser data + auth client                |
 | Deployment       | Vercel                    | Zero-config production deploy (SPA)       |
 
@@ -190,6 +227,7 @@ pms-hackathon/
 │   │
 │   ├── pages/
 │   │   ├── LoginPage.jsx                 # 🔐 Email + password sign-in
+│   │   ├── SignupPage.jsx                # 🏢 Create a new organization
 │   │   ├── GoalsPage.jsx                 # 🎯 Goals (core vs additional)
 │   │   ├── TimelinePage.jsx              # 🕒 Progress / evidence timeline
 │   │   ├── ReviewPage.jsx                # ⭐ Manager review writing
@@ -212,10 +250,16 @@ pms-hackathon/
 │       ├── ProgressBar.jsx · CycleBar.jsx · StatCard.jsx · Badge.jsx
 │
 ├── supabase/
-│   ├── schema.sql                        # Tables + RLS + team seed
+│   ├── schema.sql                        # Base tables + team seed
 │   ├── seed.sql                          # Users, goals, events, reviews, members
 │   ├── setup.sql                         # Combined schema + seed (one-shot, idempotent)
+│   ├── migrations/                       # Multi-tenancy rollout (phases 0–4)
+│   │   ├── 001_multitenant_phase0.sql    #   orgs table + organization_id + backfill
+│   │   ├── 002_multitenant_phase1.sql    #   current_org_id() function
+│   │   ├── 003_multitenant_phase2_rls.sql#   enable RLS + isolation policies
+│   │   └── 004_multitenant_phase4_notnull.sql  # NOT NULL invariant
 │   └── functions/
+│       ├── create-organization/index.ts  # 🏢 Public signup (org + first admin)
 │       ├── create-user/index.ts          # ➕ Create account (auth + profile)
 │       ├── update-user/index.ts          # ✏️ Edit account + password reset
 │       └── delete-user/index.ts          # 🗑️ Delete account + cascade cleanup
@@ -235,17 +279,20 @@ pms-hackathon/
 ### Core tables
 
 ```
-teams           id · name · full_name · color · manager_name · dept · created_at
+organizations   id · name · slug · plan · created_at          (tenant root)
+teams           id · name · full_name · color · manager_name · dept · organization_id
 users           id · name · initials · role · team_id · title · manager_name
-                · email · auth_id            (auth_id links to auth.users)
+                · email · auth_id · organization_id   (auth_id links to auth.users)
 goals           id · employee_id · title · metric · weight · progress
                 · status · source · goal_type · assigned_by · due_date
-                · team_id · category
+                · team_id · category · organization_id
 events          id · employee_id · type · text · added_by · added_by_role
-                · goal_id · team_id · created_at
-reviews         id · employee_id · manager_id · rating · comment · status
-team_members    id · team_id · user_id · name · initials · role_title · manager_name
+                · goal_id · team_id · organization_id · created_at
+reviews         id · employee_id · manager_id · rating · comment · status · organization_id
+team_members    id · team_id · user_id · name · initials · role_title · organization_id
 ```
+
+Every tenant table carries `organization_id NOT NULL` referencing `organizations(id)`.
 
 ### Constraints & enums
 
@@ -260,21 +307,24 @@ reviews.rating    1–5
 users.email       unique     users.auth_id  unique → auth.users(id)
 ```
 
-> **Auth linking:** each app `users` row is linked to a Supabase Auth user via `auth_id` + `email`. RLS is disabled for the hackathon (the browser uses the safe **anon** key); privileged writes go through Edge Functions with the service-role key.
+> **Auth linking:** each app `users` row is linked to a Supabase Auth user via `auth_id` + `email`.
+>
+> **Row Level Security is enabled** on all tenant tables. Every policy enforces `organization_id = current_org_id()`, so the browser's **anon** key can only ever touch the logged-in user's organization. Privileged, cross-cutting writes go through Edge Functions with the service-role key (which re-check org in code).
 
 ---
 
 ## ⚡ Edge Functions
 
-Server-side (Deno) functions that manage accounts with the service-role key. Each verifies the caller's JWT, looks up their role, and enforces the permission matrix.
+Server-side (Deno) functions that run with the service-role key. Each verifies the caller's JWT, looks up their role + organization, and enforces both the permission matrix **and** same-org isolation.
 
-| Function       | Action                                   | Who can call                              |
-| -------------- | ---------------------------------------- | ----------------------------------------- |
-| `create-user`  | Create auth login + profile              | HR (any role) · Manager (employees, own team) |
-| `update-user`  | Edit name/title + role/team (HR) + password reset | HR (anyone) · Manager (own-team employees) |
-| `delete-user`  | Delete login + profile + cascade cleanup | HR (anyone) · Manager (own-team employees); never self |
+| Function              | Action                                   | Who can call                              |
+| --------------------- | ---------------------------------------- | ----------------------------------------- |
+| `create-organization` | Create a new org + its first HR admin    | **Public** (signup)                       |
+| `create-user`         | Create auth login + profile (stamped with creator's org) | HR (any role) · Manager (employees, own team) |
+| `update-user`         | Edit name/title + role/team (HR) + password reset | HR (anyone) · Manager (own-team employees) |
+| `delete-user`         | Delete login + profile + cascade cleanup | HR (anyone) · Manager (own-team employees); never self |
 
-Functions read the platform-injected `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` — no secrets are committed or shipped to the browser.
+All account functions reject any target outside the caller's organization. Functions read the platform-injected `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` — no secrets are committed or shipped to the browser.
 
 ---
 
@@ -312,28 +362,36 @@ In Supabase Dashboard → **SQL Editor**, run the one-shot setup (idempotent —
 ```
 supabase/setup.sql
 ```
-This creates all tables, disables RLS (hackathon mode), and seeds teams, users, goals, events, reviews, and team members. (You can also run `schema.sql` then `seed.sql` separately.)
+This creates the base tables and seeds teams, users, goals, events, reviews, and team members.
 
-### 5. Create auth logins for the seed users
-Each seed user needs a matching Supabase Auth account linked via `auth_id`. Create them in **Authentication → Users** (Auto Confirm ✅) and set each row's `email` + `auth_id`, **or** script it with the service-role key (server-side only).
+### 5. Apply the multi-tenancy migrations (in order)
+```
+supabase/migrations/001_multitenant_phase0.sql   # orgs table + organization_id + backfill
+supabase/migrations/002_multitenant_phase1.sql   # current_org_id()
+supabase/migrations/003_multitenant_phase2_rls.sql  # enable RLS + isolation policies
+supabase/migrations/004_multitenant_phase4_notnull.sql  # NOT NULL invariant
+```
+After this, RLS is **on** and every query is scoped to the caller's organization.
 
-Demo accounts (example): `priya.mehta@…` (Employee), `riya.sharma@…` (Manager), `anjali.desai@…` (HR).
-
-### 6. Deploy the Edge Functions (for People admin)
+### 6. Deploy the Edge Functions
 ```bash
 supabase link --project-ref your-project-ref
+supabase functions deploy create-organization   # public signup
 supabase functions deploy create-user
 supabase functions deploy update-user
 supabase functions deploy delete-user
 ```
 
-### 7. Start the dev server
+### 7. Create your first organization
+The cleanest path is the app itself: open **`/signup`** and create an organization — you become its HR admin, then invite your team from the **People** page. (For the seeded demo org, link the seed `users` rows to Supabase Auth accounts via `auth_id` + `app_metadata.organization_id`, scripted with the service-role key.)
+
+### 8. Start the dev server
 ```bash
 npm run dev      # http://localhost:5173
 npm run build    # production build
 ```
 
-### 8. Deploy to Vercel
+### 9. Deploy to Vercel
 The repo includes `vercel.json` (SPA rewrite). Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the Vercel project, then:
 ```bash
 vercel --prod
@@ -344,8 +402,12 @@ vercel --prod
 ## 🎬 Demo Walkthrough
 
 ```
-Step 1 ── Visit the app → Sign in as HR (anjali.desai@…)
-          See company-wide stats across all teams.
+Step 0 ── Visit /signup → create a new organization
+          You become its HR admin and land in a private, empty workspace.
+          (Or sign in to the existing demo org as HR.)
+
+Step 1 ── Sign in as HR → see company-wide stats across your org only.
+          (Other organizations' data is never visible — RLS isolation.)
 
 Step 2 ── HR → People → "+ Add account"
           Create a Manager (role + team), then an Employee.
@@ -381,4 +443,4 @@ Step 7 ── HR → People → search / filter / paginate
 
 ---
 
-<sub>Built with ❤️ for the Opstree hackathon · Deployed on [Vercel](https://perftrail.vercel.app)</sub>
+<sub>Built with ❤️ for the Opstree hackathon · Multi-tenant SaaS · Deployed on [Vercel](https://perftrail.vercel.app)</sub>
